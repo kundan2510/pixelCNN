@@ -25,25 +25,18 @@ X = T.tensor3('X') # shape: (batchsize, height, width)
 
 input_layer = WrapperLayer(X.dimshuffle(0,1,2,'x')) # input reshaped to (batchsize, height, width,1)
 
-first_conv = pixelConv(input_layer, 1, DIM, (7,7), masktype = 'b',name=".pxCNN1")
-model.add_layer(first_conv)
+pixel_CNN = pixelConv(
+	input_layer, 
+	1, 
+	DIM, 
+	(3, 3), 
+	name = model.name + ".pxCNN1"
+	num_layers = 13
+	)
 
-last_layer = first_conv
+model.add_layer(pixel_CNN)
 
-for i in range(10):
-	last_layer = pixelConv(last_layer, DIM, DIM, (5,5), masktype = 'p',name=".pxCNN{}".format(i+2))
-	model.add_layer(last_layer)
-
-last_conv2= pixelConv(last_layer, DIM, DIM, (1,1), masktype = None, name=".fc1")
-model.add_layer(last_conv2)
-
-last_conv1 = pixelConv(last_conv2, DIM, DIM, (1,1), masktype = None, name=".fc2")
-model.add_layer(last_conv1)
-
-last_conv0 = pixelConv(last_conv1, DIM, 1, (1,1), masktype = None, name=".fc3", activation=None)
-model.add_layer(last_conv0)
-
-output_probab = T.nnet.sigmoid(last_conv0.output())
+output_probab = T.nnet.sigmoid(pixel_CNN.output())
 
 cost = T.nnet.binary_crossentropy(output_probab.flatten(), X.flatten()).mean()
 
