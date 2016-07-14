@@ -2,21 +2,22 @@ from keras.datasets import mnist
 import numpy
 from generic_utils import *
 from models import Model
-from layers import WrapperLayer, pixelConv, Softmax
+from layers import WrapperLayer, pixelConv
 import theano
 import theano.tensor as T
 import lasagne
+import random
 
 from plot_images import plot_20_figure
 
-DIM = 32
+DIM = 128
 GRAD_CLIP = 1.
 # Q_LEVELS = 2
-BATCH_SIZE = 100
+BATCH_SIZE = 16
 PRINT_EVERY = 100
 EPOCH = 1000
 
-OUT_DIR = '/Tmp/kumarkun/mnist'
+OUT_DIR = '/Tmp/kumarkun/mnist_new'
 create_folder_if_not_there(OUT_DIR)
 
 model = Model(name = "MNIST.pixelCNN")
@@ -29,8 +30,8 @@ pixel_CNN = pixelConv(
 	input_layer, 
 	1, 
 	DIM, 
-	(3, 3), 
-	name = model.name + ".pxCNN1"
+	3, 
+	name = model.name + ".pxCNN",
 	num_layers = 13
 	)
 
@@ -51,9 +52,11 @@ params = model.get_params()
 grads = T.grad(cost, wrt=params, disconnected_inputs='warn')
 grads = [T.clip(g, floatX(-GRAD_CLIP), floatX(GRAD_CLIP)) for g in grads]
 
-updates = lasagne.updates.adam(grads, params)
+# learning_rate = T.scalar('learning_rate')
 
-train_fn = theano.function([X], cost, updates=updates)
+updates = lasagne.updates.adagrad(grads, params, learning_rate = 0.01)
+
+train_fn = theano.function([X], cost, updates = updates)
 
 valid_fn = theano.function([X], cost)
 
@@ -74,22 +77,34 @@ def generate_fn(generate_routine, HEIGHT, WIDTH, num):
 X_train = downscale_images(X_train, 256)
 X_test = downscale_images(X_test, 256)
 
+errors = {'training' : [], 'validation' : []}
+
+num_iters = 0
+# init_learning_rate = floatX(0.001)
 
 print "Training"
 for i in range(EPOCH):
 	"""Training"""
+	random.shuffle(X_train)
 	costs = []
 	num_batch_train = len(X_train)//BATCH_SIZE
 	for j in range(num_batch_train):
+
 		X_curr = stochastic_binarize(X_train[j*BATCH_SIZE: (j+1)*BATCH_SIZE])
+
+		# lr = floatX(init_learning_rate/(1 + 1e-4*num_iters))
 
 		cost = train_fn(X_curr)
 
 		costs.append(cost)
+
+		num_iters += 1
+
 		if j % PRINT_EVERY == 0:
 			print ("Training: epoch {}, iter {}, cost {}".format(i,j,numpy.mean(costs)))
 
 	print("Training cost for epoch {}: {}".format(i+1, numpy.mean(costs)))
+	errors['training'].append(numpy.mean(costs))
 
 	costs = []
 	num_batch_valid = len(X_test)//BATCH_SIZE
@@ -106,12 +121,10 @@ for i in range(EPOCH):
 	save(X, '{}/epoch_{}_val_error_{}_gen_images.pkl'.format(OUT_DIR, i, numpy.mean(costs)))
 
 	print("Validation cost after epoch {}: {}".format(i+1, numpy.mean(costs)))
+	errors['validation'].append(numpy.mean(costs))
 
-
-
-
-
-
+	if i % 20:
+		save(errors, '{}/epoch_{}_NLL.pkl'.format(OUT_DIR, i))
 
 
 

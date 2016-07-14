@@ -38,8 +38,8 @@ def get_conv_2d_filter(filter_shape, subsample = (1,1), param_list = None, maskt
 
 		filter_init = uniform(w_std, filter_shape)
 
-		assert(filter_shape[2] % 2 == 1), "Only filters with odd dimesnions are allowed."
-		assert(filter_shape[3] % 2 == 1), "Only filters with odd dimesnions are allowed."
+		# assert(filter_shape[2] % 2 == 1), "Only filters with odd dimesnions are allowed."
+		# assert(filter_shape[3] % 2 == 1), "Only filters with odd dimesnions are allowed."
 
 		if masktype is not None:
 			filter_init *= floatX(0.5)
@@ -77,7 +77,7 @@ def get_conv_2d_filter(filter_shape, subsample = (1,1), param_list = None, maskt
 		# 		elif masktype == 'p':
 		# 			mask[:,:,:center_row,:] = floatX(1.)
 
-		# 	conv_filter = conv_filter*mask
+			conv_filter = conv_filter*mask
 
 		return conv_filter
 	else:
@@ -118,27 +118,43 @@ class Conv2D(Layer):
 		self.activation = activation
 
 
-	def output(self):
-		# conv_out = dnn_conv( self.X, self.filter, border_mode = self.border_mode, conv_mode='cross', subsample=self.subsample)
 		conv_out = T.nnet.conv2d(self.X, self.filter, border_mode = self.border_mode, filter_flip=False)
 		self.Y = conv_out + self.bias[None,:,None,None]
-		if activation is None:
-			return self.Y
-		elif activation == 'relu':
-			apply_activation = T.nnet.relu(self.Y)
-		elif activation == 'tanh':
-			apply_activation = T.tanh(self.Y)
-		else:
-			raise Exception("Not Implemented Error: {} activation not allowed".format(activation))
+		if self.activation is not None:
+			if self.activation == 'relu':
+				self.Y = T.nnet.relu(self.Y)
+			elif self.activation == 'tanh':
+				self.Y = T.tanh(self.Y)
+			else:
+				raise Exception("Not Implemented Error: {} activation not allowed".format(activation))
+
+
+		# conv_out = dnn_conv( self.X, self.filter, border_mode = self.border_mode, conv_mode='cross', subsample=self.subsample)
+
+
+	def output(self):
+		# conv_out = dnn_conv( self.X, self.filter, border_mode = self.border_mode, conv_mode='cross', subsample=self.subsample)
+		return self.Y
 
 
 class pixelConv(Layer):
 	"""
-	input_shape: (batch_size, height, width, input_dim)
-	output_shape: (batch_size, height, width, DIM)
+	input_shape: (batch_size, height, width, 1)
+	output_shape: (batch_size, height, width, 1)
 	"""
 	def __init__(self, input_layer, input_dim, DIM, filter_size, num_layers = 13, activation='relu', name=""):
 		assert(filter_size % 2 == 1), "Only odd filter_size allowed for now!!"
+
+		if activation is None:
+			apply_act = lambda r: r
+		elif activation == 'relu':
+			apply_act = T.nnet.relu
+		elif activation == 'tanh':
+			apply_act = T.tanh
+		else:
+			raise Exception("{} activation not implemented!!".format(activation))
+
+
 		self.X = input_layer.output().dimshuffle(0,3,1,2)
 		vertical_stack = Conv2D(
 			WrapperLayer(self.X), 
@@ -146,38 +162,47 @@ class pixelConv(Layer):
 			DIM, 
 			((filter_size // 2) + 1, filter_size), 
 			masktype=None, 
-			border_mode=(filter_size // 2, filter_size // 2), 
+			border_mode=(filter_size // 2 + 1, filter_size // 2), 
 			name= name + ".vstack1",
-			activation = activation
+			activation = None
 			)
+		out_v = vertical_stack.output()
+		vertical_and_input_stack = T.concatenate([out_v[:,:,:-(filter_size//2)-1,:], self.X], axis=1)
+
 		horizontal_stack = Conv2D(
-			WrapperLayer(self.X), 
-			input_dim, DIM, 
+			WrapperLayer(vertical_and_input_stack), 
+			input_dim+DIM, DIM, 
 			(1,filter_size), 
 			border_mode = (0,filter_size//2), 
 			masktype='p', 
 			name = name + ".hstack1",
 			activation = activation
 			)
-		self.params = vertical_stack.params + horizontal_stack
+
+		self.params = vertical_stack.params + horizontal_stack.params
 
 		X_h = horizontal_stack.output()
-		X_v = vertical_stack.output()[:,:,:-(filter_size//2),:]
+		X_v = apply_act(out_v[:,:,1:-filter_size//2,:])
 
 		for i in range(num_layers - 3):
 			# TODO: operations on integrating horizontal and vertical stacks
 			vertical_stack = Conv2D(
-				WrapperLayer(self.X_v), 
+				WrapperLayer(X_v), 
 				DIM, 
 				DIM, 
 				((filter_size // 2) + 1, filter_size), 
 				masktype = None, 
-				border_mode = (filter_size // 2, filter_size // 2), 
+				border_mode = (filter_size // 2 + 1, filter_size // 2), 
 				name= name + ".vstack{}".format(i+1),
-				activation = activation
+				activation = None
 				)
+			out_v = vertical_stack.output()
+			vertical_and_prev_stack = T.concatenate([out_v[:,:,:-(filter_size//2)-1,:], X_h], axis=1)
+
 			horizontal_stack = Conv2D(
-				WrapperLayer(self.X_h), 
+				WrapperLayer(vertical_and_prev_stack),
+				DIM*2, 
+				DIM,
 				(1, (filter_size // 2) + 1), 
 				border_mode = (0, filter_size // 2), 
 				masktype = None, 
@@ -185,39 +210,13 @@ class pixelConv(Layer):
 				activation = activation
 				)
 
-			self.params += (vertical_stack.params + horizontal_stack)
+			self.params += (vertical_stack.params + horizontal_stack.params)
 
-			X_v = vertical_stack.output()[:,:,:-(filter_size//2),:]
+			X_v = apply_act(out_v[:,:,1:-filter_size//2,:])
 			X_h = horizontal_stack.output()[:,:,:,:-(filter_size//2)]
 
-		final_vertical_stack = Conv2D(
-			WrapperLayer(self.X_v), 
-			DIM, 
-			DIM, 
-			((filter_size // 2) + 1, filter_size), 
-			masktype = None, 
-			border_mode = ((filter_size // 2) + 1, filter_size // 2), 
-			name=name+".final_vstack",
-			activation = activation
-			)
-		final_horizontal_stack = Conv2D(
-			WrapperLayer(self.X_h), 
-			(1, (filter_size // 2) + 1), 
-			border_mode = (0, filter_size // 2), 
-			masktype = None, 
-			name = name + ".final_hstack",
-			activation = activation
-			)
-
-		self.params += (final_vertical_stack.params + final_horizontal_stack)
-
-		X_v = vertical_stack.output()[:,:,:-(filter_size//2)-2,:]
-		X_h = horizontal_stack.output()[:,:,:,:-(filter_size//2)]
-
-		final_X = X_h + X_v
-
 		combined_stack1 = Conv2D(
-				WrapperLayer(self.final_X), 
+				WrapperLayer(X_h), 
 				DIM, 
 				DIM, 
 				(1, 1), 
@@ -235,11 +234,11 @@ class pixelConv(Layer):
 				masktype = None, 
 				border_mode = 'valid', 
 				name=name+".combined_stack2",
-				activation = activation
+				activation = 'tanh'
 				)
 
 		combined_stack3 = Conv2D(
-				combined_stack1, 
+				combined_stack2, 
 				DIM, 
 				1, 
 				(1, 1), 
@@ -250,7 +249,7 @@ class pixelConv(Layer):
 				)
 
 		self.params += (combined_stack1.params + combined_stack2.params + combined_stack3.params)
-		self.Y = combined_stack3.output()
+		self.Y = combined_stack3.output().dimshuffle(0,2,3,1)
 
 	def output(self):
 		return self.Y
