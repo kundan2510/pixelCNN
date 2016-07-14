@@ -29,59 +29,42 @@ def bias_weights(length, initialization='zeros', param_list = None, name = ""):
 
 	return bias
 
-def get_conv_2d_filter(filter_shape, subsample = (1,1), param_list = None, masktype = None, name = "", initialization='glorot'):
-	if initialization == 'glorot':
+def get_conv_2d_filter(filter_shape, param_list = None, masktype = None, name = ""):
+	fan_in = numpy.prod(filter_shape[1:])
+	fan_out = (filter_shape[0] * numpy.prod(filter_shape[2:]))
+	w_std = numpy.sqrt(6.0 / (fan_in + fan_out))
 
-		fan_in = numpy.prod(filter_shape[1:])
-		fan_out = (filter_shape[0] * numpy.prod(filter_shape[2:]) / numpy.prod(subsample))
-		w_std = numpy.sqrt(2 / (fan_in + fan_out))
+	filter_init = uniform(w_std, filter_shape)
 
-		filter_init = uniform(w_std, filter_shape)
+	# assert(filter_shape[2] % 2 == 1), "Only filters with odd dimesnions are allowed."
+	# assert(filter_shape[3] % 2 == 1), "Only filters with odd dimesnions are allowed."
 
-		# assert(filter_shape[2] % 2 == 1), "Only filters with odd dimesnions are allowed."
-		# assert(filter_shape[3] % 2 == 1), "Only filters with odd dimesnions are allowed."
+	if masktype is not None:
+		filter_init *= floatX(numpy.sqrt(2.))
 
-		if masktype is not None:
-			filter_init *= floatX(0.5)
+	conv_filter = theano.shared(filter_init, name = name)
+	param_list.append(conv_filter)
 
-		conv_filter = theano.shared(filter_init, name = name)
-		param_list.append(conv_filter)
+	if masktype is not None:
+		mask = numpy.ones(
+			filter_shape,
+			dtype=theano.config.floatX
+			)
 
-		if masktype is not None:
-			mask = numpy.zeros(
-				filter_shape,
-				dtype=theano.config.floatX
-				)
+		for i in range(filter_shape[2]):
+			for j in range(filter_shape[3]):
+				if i > filter_shape[2]//2:
+					mask[:,:,i,j] = floatX(0.0)
 
-			if filter_shape[3] == 1 and filter_shape[2] == 1:
-				raise Exception("Masking not allowed for (1,1) filter shape")
-			elif filter_shape[3] == 1:
-				mask[:,:,:filter_shape[2]//2,:] = floatX(1.)
-				if masktype == 'f':
-					mask[:,:,filter_shape[2]//2,:] = floatX(1.)
-			elif filter_shape[2] == 1:
-				mask[:,:,:,:filter_shape[3]//2] = floatX(1.)
-				if masktype == 'f':
-					mask[:,:,:,filter_shape[3]//2] = floatX(1.)
-			else:
-				raise Exception("Masking for 2d filters not implemented!!")
-		# 	else:
-		# 		center_row = filter_shape[2]//2
-		# 		centre_col = filter_shape[3]//2
-		# 		if masktype == 'f':
-		# 			mask[:,:,:center_row,:] = floatX(1.)
-		# 			mask[:,:,center_row,:centre_col+1] = floatX(1.)
-		# 		elif masktype == 'b':
-		# 			mask[:,:,:center_row,:] = floatX(1.)
-		# 			mask[:,:,center_row,:centre_col] = floatX(1.)
-		# 		elif masktype == 'p':
-		# 			mask[:,:,:center_row,:] = floatX(1.)
+				if i == filter_shape[2]//2 and j > filter_shape[3]//2:
+					mask[:,:,i,j] = floatX(0.0)
 
-			conv_filter = conv_filter*mask
+		if masktype == 'a':
+			mask[:,:,filter_shape[2]//2,filter_shape[3]//2] = floatX(0.0)
 
-		return conv_filter
-	else:
-		raise Exception('Not Implemented Error')
+		conv_filter = conv_filter*mask
+
+	return conv_filter
 
 class Layer:
 	'''Generic Layer Template which all layers should inherit'''
@@ -111,7 +94,7 @@ class Conv2D(Layer):
 		else:
 			self.filter_shape = (output_channels, input_channels, filter_size, filter_size)
 
-		self.filter = get_conv_2d_filter(self.filter_shape, param_list = self.params, initialization = 'glorot', masktype = masktype, name=name+'.filter')
+		self.filter = get_conv_2d_filter(self.filter_shape, param_list = self.params, masktype = masktype, name=name+'.filter')
 
 		self.bias = bias_weights((output_channels,), param_list = self.params, name = name+'.b')
 
@@ -142,7 +125,7 @@ class pixelConv(Layer):
 	input_shape: (batch_size, height, width, 1)
 	output_shape: (batch_size, height, width, 1)
 	"""
-	def __init__(self, input_layer, input_dim, DIM, filter_size, num_layers = 13, activation='relu', name=""):
+	def __init__(self, input_layer, input_dim, DIM, num_layers = 6, activation='relu', name=""):
 		assert(filter_size % 2 == 1), "Only odd filter_size allowed for now!!"
 
 		if activation is None:
@@ -156,6 +139,9 @@ class pixelConv(Layer):
 
 
 		self.X = input_layer.output().dimshuffle(0,3,1,2)
+
+		filter_size = 7 # for first layer
+
 		vertical_stack = Conv2D(
 			WrapperLayer(self.X), 
 			input_dim,
@@ -166,23 +152,27 @@ class pixelConv(Layer):
 			name= name + ".vstack1",
 			activation = None
 			)
+
 		out_v = vertical_stack.output()
-		vertical_and_input_stack = T.concatenate([out_v[:,:,:-(filter_size//2)-1,:], self.X], axis=1)
+
+		vertical_and_input_stack = T.concatenate([out_v[:,:,:-(filter_size//2)-2,:], self.X], axis=1)
 
 		horizontal_stack = Conv2D(
 			WrapperLayer(vertical_and_input_stack), 
 			input_dim+DIM, DIM, 
 			(1,filter_size), 
 			border_mode = (0,filter_size//2), 
-			masktype='p', 
+			masktype='a', 
 			name = name + ".hstack1",
-			activation = activation
+			activation = None
 			)
 
 		self.params = vertical_stack.params + horizontal_stack.params
 
 		X_h = horizontal_stack.output()
-		X_v = apply_act(out_v[:,:,1:-filter_size//2,:])
+		X_v = out_v[:,:,1:-(filter_size//2) - 1,:]
+
+		filter_size = 3 #all layers beyond first
 
 		for i in range(num_layers - 3):
 			# TODO: operations on integrating horizontal and vertical stacks
@@ -197,7 +187,7 @@ class pixelConv(Layer):
 				activation = None
 				)
 			out_v = vertical_stack.output()
-			vertical_and_prev_stack = T.concatenate([out_v[:,:,:-(filter_size//2)-1,:], X_h], axis=1)
+			vertical_and_prev_stack = T.concatenate([out_v[:,:,:-(filter_size//2)-2,:], X_h], axis=1)
 
 			horizontal_stack = Conv2D(
 				WrapperLayer(vertical_and_prev_stack),
@@ -212,7 +202,7 @@ class pixelConv(Layer):
 
 			self.params += (vertical_stack.params + horizontal_stack.params)
 
-			X_v = apply_act(out_v[:,:,1:-filter_size//2,:])
+			X_v = apply_act(out_v[:,:,1:-(filter_size//2) - 1,:])
 			X_h = horizontal_stack.output()[:,:,:,:-(filter_size//2)]
 
 		combined_stack1 = Conv2D(

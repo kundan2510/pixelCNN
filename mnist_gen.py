@@ -7,17 +7,16 @@ import theano
 import theano.tensor as T
 import lasagne
 import random
+from plot_images import plot_25_figure
 
-from plot_images import plot_20_figure
-
-DIM = 128
+DIM = 32
 GRAD_CLIP = 1.
 # Q_LEVELS = 2
 BATCH_SIZE = 16
 PRINT_EVERY = 100
 EPOCH = 1000
 
-OUT_DIR = '/Tmp/kumarkun/mnist_new'
+OUT_DIR = '/Tmp/kumarkun/mnist_new2'
 create_folder_if_not_there(OUT_DIR)
 
 model = Model(name = "MNIST.pixelCNN")
@@ -29,10 +28,9 @@ input_layer = WrapperLayer(X.dimshuffle(0,1,2,'x')) # input reshaped to (batchsi
 pixel_CNN = pixelConv(
 	input_layer, 
 	1, 
-	DIM, 
-	3, 
+	DIM,
 	name = model.name + ".pxCNN",
-	num_layers = 13
+	num_layers = 7
 	)
 
 model.add_layer(pixel_CNN)
@@ -54,7 +52,7 @@ grads = [T.clip(g, floatX(-GRAD_CLIP), floatX(GRAD_CLIP)) for g in grads]
 
 # learning_rate = T.scalar('learning_rate')
 
-updates = lasagne.updates.adagrad(grads, params, learning_rate = 0.01)
+updates = lasagne.updates.adam(grads, params, learning_rate = 0.001)
 
 train_fn = theano.function([X], cost, updates = updates)
 
@@ -117,13 +115,17 @@ for i in range(EPOCH):
 
 	model.save_params('{}/epoch_{}_val_error_{}.pkl'.format(OUT_DIR,i, numpy.mean(costs)))
 
-	X = generate_fn(generate_routine, 28, 28, 20)
-	save(X, '{}/epoch_{}_val_error_{}_gen_images.pkl'.format(OUT_DIR, i, numpy.mean(costs)))
+	X = generate_fn(generate_routine, 28, 28, 25)
+
+	reconstruction = generate_routine(X_test[:25])[:,:,:,0]
+
+	plot_25_figure(X, '{}/epoch_{}_val_error_{}_gen_images.jpg'.format(OUT_DIR, i, numpy.mean(costs)))
+	plot_25_figure(reconstruction, '{}/epoch_{}_reconstructed.jpg'.format(OUT_DIR, i))
 
 	print("Validation cost after epoch {}: {}".format(i+1, numpy.mean(costs)))
 	errors['validation'].append(numpy.mean(costs))
 
-	if i % 20:
+	if i % 20 == 0:
 		save(errors, '{}/epoch_{}_NLL.pkl'.format(OUT_DIR, i))
 
 
