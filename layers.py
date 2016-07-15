@@ -5,6 +5,10 @@ from theano.sandbox.rng_mrg import MRG_RandomStreams as RandomStreams
 from theano.sandbox.cuda.dnn import dnn_conv
 from generic_utils import *
 
+srng = RandomStreams(seed=3732)
+T.nnet.relu = lambda x: T.switch(x > floatX(0.), x, floatX(0.00001)*x)
+
+
 def uniform(stdev, size):
     """uniform distribution with the given stdev and size"""
     return numpy.random.uniform(
@@ -32,7 +36,7 @@ def bias_weights(length, initialization='zeros', param_list = None, name = ""):
 def get_conv_2d_filter(filter_shape, param_list = None, masktype = None, name = ""):
 	fan_in = numpy.prod(filter_shape[1:])
 	fan_out = (filter_shape[0] * numpy.prod(filter_shape[2:]))
-	w_std = numpy.sqrt(6.0 / (fan_in + fan_out))
+	w_std = numpy.sqrt(2.0 / (fan_in + fan_out))
 
 	filter_init = uniform(w_std, filter_shape)
 
@@ -125,8 +129,7 @@ class pixelConv(Layer):
 	input_shape: (batch_size, height, width, 1)
 	output_shape: (batch_size, height, width, 1)
 	"""
-	def __init__(self, input_layer, input_dim, DIM, num_layers = 6, activation='relu', name=""):
-		assert(filter_size % 2 == 1), "Only odd filter_size allowed for now!!"
+	def __init__(self, input_layer, input_dim, DIM, Q_LEVELS = None, num_layers = 6, activation='relu', name=""):
 
 		if activation is None:
 			apply_act = lambda r: r
@@ -174,7 +177,7 @@ class pixelConv(Layer):
 
 		filter_size = 3 #all layers beyond first
 
-		for i in range(num_layers - 3):
+		for i in range(num_layers - 2):
 			# TODO: operations on integrating horizontal and vertical stacks
 			vertical_stack = Conv2D(
 				WrapperLayer(X_v), 
@@ -203,7 +206,7 @@ class pixelConv(Layer):
 			self.params += (vertical_stack.params + horizontal_stack.params)
 
 			X_v = apply_act(out_v[:,:,1:-(filter_size//2) - 1,:])
-			X_h = horizontal_stack.output()[:,:,:,:-(filter_size//2)]
+			X_h = horizontal_stack.output()[:,:,:,:-(filter_size//2)] + X_h #residual connection added
 
 		combined_stack1 = Conv2D(
 				WrapperLayer(X_h), 
@@ -216,30 +219,24 @@ class pixelConv(Layer):
 				activation = activation
 				)
 
+		if Q_LEVELS is None:
+			out_dim = input_dim
+		else:
+			out_dim = Q_LEVELS
+
 		combined_stack2 = Conv2D(
 				combined_stack1, 
 				DIM, 
-				DIM, 
+				out_dim, 
 				(1, 1), 
 				masktype = None, 
 				border_mode = 'valid', 
 				name=name+".combined_stack2",
-				activation = 'tanh'
-				)
-
-		combined_stack3 = Conv2D(
-				combined_stack2, 
-				DIM, 
-				1, 
-				(1, 1), 
-				masktype = None, 
-				border_mode = 'valid', 
-				name=name+".combined_stack3",
 				activation = None
 				)
 
-		self.params += (combined_stack1.params + combined_stack2.params + combined_stack3.params)
-		self.Y = combined_stack3.output().dimshuffle(0,2,3,1)
+		self.params += (combined_stack1.params + combined_stack2.params)
+		self.Y = combined_stack2.output().dimshuffle(0,2,3,1)
 
 	def output(self):
 		return self.Y

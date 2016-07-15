@@ -1,4 +1,4 @@
-from keras.datasets import mnist
+from keras.datasets import cifar10
 import numpy
 from generic_utils import *
 from models import Model
@@ -11,7 +11,7 @@ from plot_images import plot_25_figure
 
 DIM = 32
 GRAD_CLIP = 1.
-# Q_LEVELS = 2
+Q_LEVELS = 256
 BATCH_SIZE = 100
 PRINT_EVERY = 500
 EPOCH = 100
@@ -23,14 +23,15 @@ model = Model(name = "MNIST.pixelCNN")
 
 
 is_train = T.scalar()
-X = T.tensor3('X') # shape: (batchsize, height, width)
+X = T.tensor4('X') # shape: (batchsize, height, width)
 
-input_layer = WrapperLayer(X.dimshuffle(0,1,2,'x')) # input reshaped to (batchsize, height, width,1)
+input_layer = WrapperLayer(X) # input reshaped to (batchsize, height, width,1)
 
 pixel_CNN = pixelConv(
 	input_layer, 
-	1, 
+	3, 
 	DIM,
+	Q_LEVELS = Q_LEVELS,
 	name = model.name + ".pxCNN",
 	num_layers = 12,
 	is_train = is_train
@@ -55,11 +56,11 @@ grads = [T.clip(g, floatX(-GRAD_CLIP), floatX(GRAD_CLIP)) for g in grads]
 
 updates = lasagne.updates.adam(grads, params, learning_rate = 1e-3)
 
-train_fn = theano.function([X, theano.In(is_train, value=floatX(1.0))], cost, updates = updates)
+train_fn = theano.function([X], cost, updates = updates)
 
-valid_fn = theano.function([X, theano.In(is_train, value=floatX(0.0))], cost)
+valid_fn = theano.function([X], cost)
 
-generate_routine = theano.function([X, theano.In(is_train, value=floatX(0.0))], output_probab)
+generate_routine = theano.function([X], output_probab)
 
 def generate_fn(generate_routine, HEIGHT, WIDTH, num):
 	X = floatX(numpy.zeros((num, HEIGHT, WIDTH)))
@@ -67,11 +68,11 @@ def generate_fn(generate_routine, HEIGHT, WIDTH, num):
 	for i in range(HEIGHT):
 		for j in range(WIDTH):
 			samples = generate_routine(X)
-			X[:,i,j] = floatX(stochastic_binarize(samples)[:,i,j,0])
+			X[:,i,j] = floatX(stochastic_binarize(samples)[:,i,j])
 
 	return X
 
-(X_train, _), (X_test, _) = mnist.load_data()
+(X_train, _), (X_test, _) = cifar10.load_data()
 
 X_train = downscale_images(X_train, 256)
 X_test = downscale_images(X_test, 256)
