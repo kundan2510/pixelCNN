@@ -189,7 +189,17 @@ class pixelConv(Layer):
 				name= name + ".vstack{}".format(i+1),
 				activation = None
 				)
-			out_v = vertical_stack.output()
+			v2h = Conv2D(
+				vertical_stack, 
+				DIM, 
+				DIM, 
+				(1,1), 
+				masktype = None, 
+				border_mode = 'valid', 
+				name= name + ".v2h{}".format(i+1),
+				activation = None
+				)
+			out_v = v2h.output()
 			vertical_and_prev_stack = T.concatenate([out_v[:,:,:-(filter_size//2)-2,:], X_h], axis=1)
 
 			horizontal_stack = Conv2D(
@@ -203,10 +213,21 @@ class pixelConv(Layer):
 				activation = activation
 				)
 
-			self.params += (vertical_stack.params + horizontal_stack.params)
+			h2h = Conv2D(
+				horizontal_stack,
+				DIM, 
+				DIM,
+				(1, 1), 
+				border_mode = 'valid', 
+				masktype = None, 
+				name = name + ".h2hstack{}".format(i+1),
+				activation = activation
+				)
 
-			X_v = apply_act(out_v[:,:,1:-(filter_size//2) - 1,:])
-			X_h = horizontal_stack.output()[:,:,:,:-(filter_size//2)] + X_h #residual connection added
+			self.params += (vertical_stack.params + horizontal_stack.params + v2h.params + h2h.params)
+
+			X_v = apply_act(vertical_stack.output()[:,:,1:-(filter_size//2) - 1,:])
+			X_h = h2h.output()[:,:,:,:-(filter_size//2)] + X_h #residual connection added
 
 		combined_stack1 = Conv2D(
 				WrapperLayer(X_h), 
@@ -222,7 +243,7 @@ class pixelConv(Layer):
 		if Q_LEVELS is None:
 			out_dim = input_dim
 		else:
-			out_dim = Q_LEVELS
+			out_dim = input_dim*Q_LEVELS
 
 		combined_stack2 = Conv2D(
 				combined_stack1, 
@@ -236,7 +257,15 @@ class pixelConv(Layer):
 				)
 
 		self.params += (combined_stack1.params + combined_stack2.params)
-		self.Y = combined_stack2.output().dimshuffle(0,2,3,1)
+
+		pre_final_out = combined_stack2.output().dimshuffle(0,2,3,1)
+
+		if Q_LEVELS is None:
+			self.Y = pre_final_out
+		else:
+			# pre_final_out = pre_final_out.dimshuffle(0,1,2,3,'x')
+			old_shape = pre_final_out.shape
+			self.Y = pre_final_out.reshape((old_shape[0], old_shape[1], old_shape[2],  old_shape[3]//Q_LEVELS, -1))
 
 	def output(self):
 		return self.Y
@@ -250,4 +279,14 @@ class WrapperLayer(Layer):
 	def output(self):
 		return self.X
 
+class Softmax(Layer):
+	def __init__(self, input_layer,  name=""):
+		self.input_layer = input_layer
+		self.name = name
+		self.params = []
+		self.X = self.input_layer.output()
+		self.input_shape = self.X.shape
+
+	def output(self):
+		return T.nnet.softmax(self.X.reshape((-1,self.input_shape[self.X.ndim-1]))).reshape(self.input_shape)
 

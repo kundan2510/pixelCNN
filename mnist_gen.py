@@ -2,28 +2,30 @@ from keras.datasets import mnist
 import numpy
 from generic_utils import *
 from models import Model
-from layers import WrapperLayer, pixelConv
+from layers import WrapperLayer, pixelConv, Softmax
 import theano
 import theano.tensor as T
 import lasagne
 import random
 from plot_images import plot_25_figure
 
-DIM = 32
+DIM = 24
 GRAD_CLIP = 1.
-# Q_LEVELS = 2
-BATCH_SIZE = 100
-PRINT_EVERY = 500
+Q_LEVELS = 256
+TRAIN_BATCH_SIZE = 10
+VALIDATE_BATCH_SIZE = 200
+PRINT_EVERY = 250
+VALIDATE_EVERY = 500
 EPOCH = 100
 
-OUT_DIR = '/Tmp/kumarkun/mnist_new2'
+OUT_DIR = '/Tmp/kumarkun/mnist_new3'
 create_folder_if_not_there(OUT_DIR)
 
 model = Model(name = "MNIST.pixelCNN")
 
 
-is_train = T.scalar()
 X = T.tensor3('X') # shape: (batchsize, height, width)
+X_r = T.itensor3('X_r') #shape: (batchsize, height, width)
 
 input_layer = WrapperLayer(X.dimshuffle(0,1,2,'x')) # input reshaped to (batchsize, height, width,1)
 
@@ -32,15 +34,20 @@ pixel_CNN = pixelConv(
 	1, 
 	DIM,
 	name = model.name + ".pxCNN",
-	num_layers = 12,
-	is_train = is_train
+	num_layers = 8,
+	Q_LEVELS = Q_LEVELS
 	)
 
 model.add_layer(pixel_CNN)
 
-output_probab = T.nnet.sigmoid(pixel_CNN.output())
+output_probab = Softmax(pixel_CNN).output()
 
-cost = T.nnet.binary_crossentropy(output_probab.flatten(), X.flatten()).mean()
+cost = T.nnet.categorical_crossentropy(
+	output_probab.reshape((-1,output_probab.shape[output_probab.ndim - 1])),
+	X_r.flatten()
+	).mean()
+
+output_image = sample_from_softmax(output_probab)
 # in nats
 
 
@@ -55,76 +62,78 @@ grads = [T.clip(g, floatX(-GRAD_CLIP), floatX(GRAD_CLIP)) for g in grads]
 
 updates = lasagne.updates.adam(grads, params, learning_rate = 1e-3)
 
-train_fn = theano.function([X, theano.In(is_train, value=floatX(1.0))], cost, updates = updates)
+train_fn = theano.function([X, X_r], cost, updates = updates)
 
-valid_fn = theano.function([X, theano.In(is_train, value=floatX(0.0))], cost)
+valid_fn = theano.function([X, X_r], cost)
 
-generate_routine = theano.function([X, theano.In(is_train, value=floatX(0.0))], output_probab)
+generate_routine = theano.function([X], output_image)
 
 def generate_fn(generate_routine, HEIGHT, WIDTH, num):
 	X = floatX(numpy.zeros((num, HEIGHT, WIDTH)))
-
+	out = numpy.zeros((num,HEIGHT, WIDTH))
 	for i in range(HEIGHT):
 		for j in range(WIDTH):
 			samples = generate_routine(X)
-			X[:,i,j] = floatX(stochastic_binarize(samples)[:,i,j,0])
+			out[:,i,j] = samples[:,i,j,0]
+			X[:,i,j] = downscale_images(samples[:,i,j,0], 256)
 
 	return X
 
-(X_train, _), (X_test, _) = mnist.load_data()
+(X_train_r, _), (X_test_r, _) = mnist.load_data()
 
-X_train = downscale_images(X_train, 256)
-X_test = downscale_images(X_test, 256)
+X_train = downscale_images(X_train_r, 256)
+X_test = downscale_images(X_test_r, 256)
 
 errors = {'training' : [], 'validation' : []}
 
 num_iters = 0
 # init_learning_rate = floatX(0.001)
 
+def validate():
+	costs = []
+	BATCH_SIZE = VALIDATE_BATCH_SIZE
+	num_batch_valid = len(X_test)//BATCH_SIZE
+
+	for j in range(num_batch_valid):
+		cost = valid_fn(X_test[j*BATCH_SIZE: (j+1)*BATCH_SIZE], X_test_r[j*BATCH_SIZE: (j+1)*BATCH_SIZE])
+		costs.append(cost)
+
+	return numpy.mean(costs)
+
+
 print "Training"
 for i in range(EPOCH):
 	"""Training"""
-	random.shuffle(X_train)
 	costs = []
+	BATCH_SIZE = TRAIN_BATCH_SIZE
 	num_batch_train = len(X_train)//BATCH_SIZE
 	for j in range(num_batch_train):
 
-		X_curr = stochastic_binarize(X_train[j*BATCH_SIZE: (j+1)*BATCH_SIZE])
-
-		# lr = floatX(init_learning_rate/(1 + 1e-4*num_iters))
-
-		cost = train_fn(X_curr)
+		cost = train_fn(X_train[j*BATCH_SIZE: (j+1)*BATCH_SIZE], X_train_r[j*BATCH_SIZE: (j+1)*BATCH_SIZE])
 
 		costs.append(cost)
 
 		num_iters += 1
 
-		if j % PRINT_EVERY == 0:
+		if (j+1) % PRINT_EVERY == 0:
 			print ("Training: epoch {}, iter {}, cost {}".format(i,j,numpy.mean(costs)))
 
 	print("Training cost for epoch {}: {}".format(i+1, numpy.mean(costs)))
 	errors['training'].append(numpy.mean(costs))
 
-	costs = []
-	num_batch_valid = len(X_test)//BATCH_SIZE
-	for j in range(num_batch_valid):
-		X_curr = stochastic_binarize(X_test[j*BATCH_SIZE: (j+1)*BATCH_SIZE])
-		cost = valid_fn(X_curr)
-		costs.append(cost)
-		if j % PRINT_EVERY == 0:
-			print ("Validation: epoch {}, iter {}, cost {}".format(i,j,numpy.mean(costs)))
+	val_error = validate()	
+	errors['validation'].append(val_error)
 
-	model.save_params('{}/epoch_{}_val_error_{}.pkl'.format(OUT_DIR,i, numpy.mean(costs)))
+	model.save_params('{}/epoch_{}_val_error_{}.pkl'.format(OUT_DIR,i, val_error))
 
 	X = generate_fn(generate_routine, 28, 28, 25)
 
 	reconstruction = generate_routine(X_test[:25])[:,:,:,0]
 
-	plot_25_figure(X, '{}/epoch_{}_val_error_{}_gen_images.jpg'.format(OUT_DIR, i, numpy.mean(costs)))
+	plot_25_figure(X, '{}/epoch_{}_val_error_{}_gen_images.jpg'.format(OUT_DIR, i, val_error))
 	plot_25_figure(reconstruction, '{}/epoch_{}_reconstructed.jpg'.format(OUT_DIR, i))
 
-	print("Validation cost after epoch {}: {}".format(i+1, numpy.mean(costs)))
-	errors['validation'].append(numpy.mean(costs))
+	print("Validation cost after epoch {}: {}".format(i+1, val_error))
 
 	if i % 2 == 0:
 		save(errors, '{}/epoch_{}_NLL.pkl'.format(OUT_DIR, i))
