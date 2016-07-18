@@ -4,9 +4,13 @@
 Most of the code is in core theano. 'keras' has been used for loading data. Optimizer implementation from 'lasagne' has been used.
 
 Dependencies:
+
 [theano](http://deeplearning.net/software/theano/install.html)
+
 [lasagne](http://lasagne.readthedocs.io/en/latest/user/installation.html)
+
 [keras](http://keras.io/#getting-started-30-seconds-to-keras)
+
 Generated images
 
 ![Generated images](output/generated_only_images.jpg)
