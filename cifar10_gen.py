@@ -74,14 +74,17 @@ def generate_fn(generate_routine, HEIGHT, WIDTH, num):
 		for j in range(WIDTH):
 			samples = generate_routine(X)
 			out[:,i,j] = samples[:,i,j]
-			X[:,:,i,j] = downscale_images(samples[:,i,j,:], 256)
+			X[:,:,i,j] = downscale_images(samples[:,i,j,:], Q_LEVELS - 1)
 
 	return out
 
 (X_train_r, _), (X_test_r, _) = cifar10.load_data()
 
-X_train = downscale_images(X_train_r, 256)
-X_test = downscale_images(X_test_r, 256)
+X_train_r = upscale_images(downscale_images(X_train_r, 256), Q_LEVELS) 
+X_test_r = upscale_images(downscale_images(X_test_r, 256), Q_LEVELS)
+
+X_train = downscale_images(X_train_r, Q_LEVELS - 1)
+X_test = downscale_images(X_test_r, Q_LEVELS - 1)
 
 errors = {'training' : [], 'validation' : []}
 
