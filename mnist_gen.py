@@ -1,29 +1,31 @@
-from keras.datasets import mnist
+from keras.datasets import mnist  #for loading the dataset
 import numpy
-from generic_utils import *
-from models import Model
-from layers import WrapperLayer, pixelConv, Softmax
+from generic_utils import *  #has some utility functions
+from models import Model  # class for collecting parameters fom layers and other stuffs
+from layers import WrapperLayer, pixelConv, Softmax # module that implements various layers
 import theano
 import theano.tensor as T
 import lasagne
 import random
-from plot_images import plot_25_figure
+from plot_images import plot_25_figure, plot_100_figure # visualiztion of images
 from sys import argv
 
-DIM = 32
+DIM = 32 # feature map length for convolution layers
 GRAD_CLIP = 1.
-Q_LEVELS = 4
-TRAIN_BATCH_SIZE = 100
+Q_LEVELS = 4 #level of quantization for channels, it has to be between 2 and 256
+TRAIN_BATCH_SIZE = 100 
 VALIDATE_BATCH_SIZE = 200
-PRINT_EVERY = 100
-VALIDATE_EVERY = 50
+PRINT_EVERY = 100 #number of iterations after which stats are printed
 EPOCH = 1000
 
-PRETRAINED = False # if True, then argv[1] is assumed to be pre-trained file
-GENERATE_ONLY = False
+PRETRAINED = True # whether to use a pre-trained weigths. if True, then argv[1] is assumed to be pickled weights of pre-trained model
+GENERATE_ONLY = True # whether to only generate samples. Useful when you want to generate from a pre-trained model
 
-OUT_DIR = '/Tmp/kumarkun/mnist_new_l4'
+OUT_DIR = '/Tmp/kumarkun/mnist_new_samples' # output folder for storing weights, generated and reconstructed samples
 create_folder_if_not_there(OUT_DIR)
+
+
+# Creating model.
 
 model = Model(name = "MNIST.pixelCNN")
 
@@ -46,23 +48,24 @@ model.add_layer(pixel_CNN)
 
 output_probab = Softmax(pixel_CNN).output()
 
+# in nats
 cost = T.nnet.categorical_crossentropy(
 	output_probab.reshape((-1,output_probab.shape[output_probab.ndim - 1])),
 	X_r.flatten()
 	).mean()
 
 output_image = sample_from_softmax(output_probab)
-# in nats
 
 
-model.print_params()
+
+model.print_params() 
 
 params = model.get_params()
 
 grads = T.grad(cost, wrt=params, disconnected_inputs='warn')
 grads = [T.clip(g, floatX(-GRAD_CLIP), floatX(GRAD_CLIP)) for g in grads]
 
-# learning_rate = T.scalar('learning_rate')
+
 
 updates = lasagne.updates.adam(grads, params, learning_rate = 1e-3)
 
@@ -85,23 +88,34 @@ def generate_fn(generate_routine, HEIGHT, WIDTH, num):
 if PRETRAINED:
 	model.load_params(argv[1])
 
-if GENERATE_ONLY:
-	X = generate_fn(generate_routine, 28, 28, 25)
-	plot_25_figure(X, '{}/generated_only_images.jpg'.format(OUT_DIR))
-	exit()
 
 (X_train_r, _), (X_test_r, _) = mnist.load_data()
 
-X_train_r = upscale_images(downscale_images(X_train_r, 256), Q_LEVELS)
+'''
+First, downscale images from 0-255 to [0,1), then upscale to 0-(Q_LEVELS-1).
+This quantized image becomes the target.
+Targets are again downscaled to [0,1] to get the inputs.
+'''
+
+X_train_r = upscale_images(downscale_images(X_train_r, 256), Q_LEVELS) 
 X_test_r = upscale_images(downscale_images(X_test_r, 256), Q_LEVELS)
 
 X_train = downscale_images(X_train_r, Q_LEVELS - 1)
 X_test = downscale_images(X_test_r, Q_LEVELS - 1)
 
+
+if GENERATE_ONLY:
+	X = generate_fn(generate_routine, 28, 28, 100)
+	plot_100_figure(X, '{}/generated_only_images.jpg'.format(OUT_DIR))
+	j = int(random.random() * (len(X_train) - 101))
+	plot_100_figure(X_train[j : j + 100], '{}/training_images.jpg'.format(OUT_DIR))
+	exit()
+
+
+
 errors = {'training' : [], 'validation' : []}
 
 num_iters = 0
-# init_learning_rate = floatX(0.001)
 
 def validate():
 	costs = []
@@ -138,9 +152,9 @@ for i in range(EPOCH):
 	val_error = validate()	
 	errors['validation'].append(val_error)
 
-	model.save_params('{}/epoch_{}_val_error_{}.pkl'.format(OUT_DIR,i, val_error))
+	model.save_params('{}/epoch_{}_val_error_{}.pkl'.format(OUT_DIR,i, val_error)) #parameters are saved after every epoch
 
-	X = generate_fn(generate_routine, 28, 28, 25)
+	X = generate_fn(generate_routine, 28, 28, 25) # 25 images are generated after every epoch
 
 	reconstruction = generate_routine(X_test[:25])[:,:,:,0]
 
@@ -150,7 +164,7 @@ for i in range(EPOCH):
 	print("Validation cost after epoch {}: {}".format(i+1, val_error))
 
 	if i % 2 == 0:
-		save(errors, '{}/epoch_{}_NLL.pkl'.format(OUT_DIR, i))
+		save(errors, '{}/epoch_{}_NLL.pkl'.format(OUT_DIR, i)) #NLL upto ith epoch stored after every 2 epochs. Too much redundancy here. 
 
 
 

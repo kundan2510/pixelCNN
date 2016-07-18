@@ -33,6 +33,11 @@ def bias_weights(length, initialization='zeros', param_list = None, name = ""):
 
 	return bias
 
+'''
+get_conv_2d_filter: Takes a filter_shape (a tuple/array of length 4) and returns corresponding convolution filter
+masktype is optional.
+param_list is mandatory. It appends all the parameters from the function to this list
+'''
 def get_conv_2d_filter(filter_shape, param_list = None, masktype = None, name = ""):
 	fan_in = numpy.prod(filter_shape[1:])
 	fan_out = (filter_shape[0] * numpy.prod(filter_shape[2:]))
@@ -40,8 +45,6 @@ def get_conv_2d_filter(filter_shape, param_list = None, masktype = None, name = 
 
 	filter_init = uniform(w_std, filter_shape)
 
-	# assert(filter_shape[2] % 2 == 1), "Only filters with odd dimesnions are allowed."
-	# assert(filter_shape[3] % 2 == 1), "Only filters with odd dimesnions are allowed."
 
 	if masktype is not None:
 		filter_init *= floatX(numpy.sqrt(2.))
@@ -71,7 +74,11 @@ def get_conv_2d_filter(filter_shape, param_list = None, masktype = None, name = 
 	return conv_filter
 
 class Layer:
-	'''Generic Layer Template which all layers should inherit'''
+	'''
+	Generic Layer Template which all layers should inherit.
+	Every layer should have a name and params attribute containing all
+	trainable parameters for that layer.
+	'''
 	def __init__(name = ""):
 		self.name = name
 		self.params = []
@@ -82,8 +89,11 @@ class Layer:
 
 class Conv2D(Layer):
 	"""
+	Basic convolution layer
+
 	input_shape: (batch_size, input_channels, height, width)
 	filter_size: int or (row, column)
+
 	"""
 	def __init__(self, input_layer, input_channels, output_channels, filter_size, subsample = (1,1), border_mode='half', masktype = None, activation = None, name = ""):
 		self.X = input_layer.output()
@@ -115,19 +125,28 @@ class Conv2D(Layer):
 			else:
 				raise Exception("Not Implemented Error: {} activation not allowed".format(activation))
 
-
-		# conv_out = dnn_conv( self.X, self.filter, border_mode = self.border_mode, conv_mode='cross', subsample=self.subsample)
-
-
 	def output(self):
-		# conv_out = dnn_conv( self.X, self.filter, border_mode = self.border_mode, conv_mode='cross', subsample=self.subsample)
 		return self.Y
 
 
 class pixelConv(Layer):
 	"""
-	input_shape: (batch_size, height, width, 1)
-	output_shape: (batch_size, height, width, 1)
+	This layer implements pixelCNN module which is mentioned in https://arxiv.org/abs/1606.05328
+	Main diferences: activation is not gated in this implementation.
+
+	Masking is not used except for the first horizontal stack. Instead, appropriate filter size 
+	with appropriate shifting of output feature maps used get the same effect as that of masking. This
+	has been described in detail in the second paragraph of section 2.2 of the paper. There is no blind spots.
+
+	There are four convolutions per as described in figure 2. Left output and input in this image corresponds
+	to vertical feature map and right output/input corresponds to horizontal feature map. There is residual 
+	connection added on the horizontal stack
+
+	input_shape: (batch_size, height, width, input_dim)
+	output_shape: (batch_size, height, width, input_dim)
+				when Q_LEVELS is None
+				else 
+				(batch_size, height, width, input_dim, Q_LEVELS)
 	"""
 	def __init__(self, input_layer, input_dim, DIM, Q_LEVELS = None, num_layers = 6, activation='relu', name=""):
 
@@ -143,8 +162,19 @@ class pixelConv(Layer):
 
 		self.X = input_layer.output().dimshuffle(0,3,1,2)
 
+		''' for first layer filter size should be 7 x 7 '''
 		filter_size = 7 # for first layer
 
+		''' 
+		masked filter_size x filter_size convolution for vertical stack effect can be achieved 
+		by just convolving the image with (filter_size // 2) + 1, filter_size) filter, 
+		padding filter_size // 2 + 1 rows and filter_size // 2 0s columns on both sides of images with 0s.
+
+		This is easy to see that in this case first row in the ouput does not depend on the image, 
+		second row depends only on the first row of the image and so on. The final effect is anything in the i'th row
+		of the output use information only upto i-1th row in the input.
+
+		'''
 		vertical_stack = Conv2D(
 			WrapperLayer(self.X), 
 			input_dim,
@@ -158,7 +188,17 @@ class pixelConv(Layer):
 
 		out_v = vertical_stack.output()
 
+		'''
+		while generating i'th row we can only use information upto i-1th row in the vertical stack.
+		Horizontal stack gets input from vertical stack as well as previous layer.
+
+		'''
 		vertical_and_input_stack = T.concatenate([out_v[:,:,:-(filter_size//2)-2,:], self.X], axis=1)
+
+		'''horizontal stack is straight forward. For first layer, I have used masked convolution as
+		 	we are not allowed to see the pixel we would generate. 
+
+		'''
 
 		horizontal_stack = Conv2D(
 			WrapperLayer(vertical_and_input_stack), 
@@ -172,13 +212,18 @@ class pixelConv(Layer):
 
 		self.params = vertical_stack.params + horizontal_stack.params
 
-		X_h = horizontal_stack.output()
-		X_v = out_v[:,:,1:-(filter_size//2) - 1,:]
+		X_h = horizontal_stack.output() #horizontal stack output
+		X_v = out_v[:,:,1:-(filter_size//2) - 1,:] #vertical stack output
 
-		filter_size = 3 #all layers beyond first
+		filter_size = 3 #all layers beyond first has effective filtersize 3
 
+		'''
+		one run of the loop implements four convolutions mentioned in figure 2 of the image
+		with residual connection added on the horizontal stack.
+
+		Two convolutions are just linear transformations of the faeture maps as convolution filter size is (1,1)
+		'''
 		for i in range(num_layers - 2):
-			# TODO: operations on integrating horizontal and vertical stacks
 			vertical_stack = Conv2D(
 				WrapperLayer(X_v), 
 				DIM, 
@@ -228,6 +273,8 @@ class pixelConv(Layer):
 
 			X_v = apply_act(vertical_stack.output()[:,:,1:-(filter_size//2) - 1,:])
 			X_h = h2h.output()[:,:,:,:-(filter_size//2)] + X_h #residual connection added
+
+		'''single fully connected layer.'''
 
 		combined_stack1 = Conv2D(
 				WrapperLayer(X_h), 
