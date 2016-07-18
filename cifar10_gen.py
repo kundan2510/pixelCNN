@@ -27,7 +27,7 @@ X = T.tensor4('X') # shape: (batchsize, channels, height, width)
 X_r = T.itensor4('X_r')
 
 X_transformed = X_r.dimshuffle(0,2,3,1)
-input_layer = WrapperLayer(X.dimshuffle(0,2,3,1)) # input reshaped to (batchsize, height, width,1)
+input_layer = WrapperLayer(X.dimshuffle(0,2,3,1)) # input reshaped to (batchsize, height, width,3)
 
 pixel_CNN = pixelConv(
 	input_layer, 

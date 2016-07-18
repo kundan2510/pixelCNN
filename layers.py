@@ -186,7 +186,7 @@ class pixelConv(Layer):
 				((filter_size // 2) + 1, filter_size), 
 				masktype = None, 
 				border_mode = (filter_size // 2 + 1, filter_size // 2), 
-				name= name + ".vstack{}".format(i+1),
+				name= name + ".vstack{}".format(i+2),
 				activation = None
 				)
 			v2h = Conv2D(
@@ -196,7 +196,7 @@ class pixelConv(Layer):
 				(1,1), 
 				masktype = None, 
 				border_mode = 'valid', 
-				name= name + ".v2h{}".format(i+1),
+				name= name + ".v2h{}".format(i+2),
 				activation = None
 				)
 			out_v = v2h.output()
@@ -209,7 +209,7 @@ class pixelConv(Layer):
 				(1, (filter_size // 2) + 1), 
 				border_mode = (0, filter_size // 2), 
 				masktype = None, 
-				name = name + ".hstack{}".format(i+1),
+				name = name + ".hstack{}".format(i+2),
 				activation = activation
 				)
 
@@ -220,7 +220,7 @@ class pixelConv(Layer):
 				(1, 1), 
 				border_mode = 'valid', 
 				masktype = None, 
-				name = name + ".h2hstack{}".format(i+1),
+				name = name + ".h2hstack{}".format(i+2),
 				activation = activation
 				)
 

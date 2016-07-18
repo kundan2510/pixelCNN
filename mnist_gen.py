@@ -8,17 +8,21 @@ import theano.tensor as T
 import lasagne
 import random
 from plot_images import plot_25_figure
+from sys import argv
 
-DIM = 24
+DIM = 32
 GRAD_CLIP = 1.
-Q_LEVELS = 256
-TRAIN_BATCH_SIZE = 10
+Q_LEVELS = 4
+TRAIN_BATCH_SIZE = 100
 VALIDATE_BATCH_SIZE = 200
-PRINT_EVERY = 250
-VALIDATE_EVERY = 500
-EPOCH = 100
+PRINT_EVERY = 100
+VALIDATE_EVERY = 50
+EPOCH = 1000
 
-OUT_DIR = '/Tmp/kumarkun/mnist_new3'
+PRETRAINED = False # if True, then argv[1] is assumed to be pre-trained file
+GENERATE_ONLY = False
+
+OUT_DIR = '/Tmp/kumarkun/mnist_new_l4'
 create_folder_if_not_there(OUT_DIR)
 
 model = Model(name = "MNIST.pixelCNN")
@@ -34,7 +38,7 @@ pixel_CNN = pixelConv(
 	1, 
 	DIM,
 	name = model.name + ".pxCNN",
-	num_layers = 8,
+	num_layers = 12,
 	Q_LEVELS = Q_LEVELS
 	)
 
@@ -70,19 +74,29 @@ generate_routine = theano.function([X], output_image)
 
 def generate_fn(generate_routine, HEIGHT, WIDTH, num):
 	X = floatX(numpy.zeros((num, HEIGHT, WIDTH)))
-	out = numpy.zeros((num,HEIGHT, WIDTH))
 	for i in range(HEIGHT):
 		for j in range(WIDTH):
 			samples = generate_routine(X)
-			out[:,i,j] = samples[:,i,j,0]
-			X[:,i,j] = downscale_images(samples[:,i,j,0], 256)
+			X[:,i,j] = downscale_images(samples[:,i,j,0], Q_LEVELS-1)
 
 	return X
 
+
+if PRETRAINED:
+	model.load_params(argv[1])
+
+if GENERATE_ONLY:
+	X = generate_fn(generate_routine, 28, 28, 25)
+	plot_25_figure(X, '{}/generated_only_images.jpg'.format(OUT_DIR))
+	exit()
+
 (X_train_r, _), (X_test_r, _) = mnist.load_data()
 
-X_train = downscale_images(X_train_r, 256)
-X_test = downscale_images(X_test_r, 256)
+X_train_r = upscale_images(downscale_images(X_train_r, 256), Q_LEVELS)
+X_test_r = upscale_images(downscale_images(X_test_r, 256), Q_LEVELS)
+
+X_train = downscale_images(X_train_r, Q_LEVELS - 1)
+X_test = downscale_images(X_test_r, Q_LEVELS - 1)
 
 errors = {'training' : [], 'validation' : []}
 
@@ -116,7 +130,7 @@ for i in range(EPOCH):
 		num_iters += 1
 
 		if (j+1) % PRINT_EVERY == 0:
-			print ("Training: epoch {}, iter {}, cost {}".format(i,j,numpy.mean(costs)))
+			print ("Training: epoch {}, iter {}, cost {}".format(i,j+1,numpy.mean(costs)))
 
 	print("Training cost for epoch {}: {}".format(i+1, numpy.mean(costs)))
 	errors['training'].append(numpy.mean(costs))
