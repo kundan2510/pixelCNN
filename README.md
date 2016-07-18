@@ -15,7 +15,9 @@ Dependencies:
 You can use [experiments.sh](experiments.sh) to train the model and [install_dependencies.sh](install_dependencies.sh) to install the dependencies.
 
 Notes on results:
+
 1. Images with 2-bit depth has been considered for training as well as generation e.g. every pixel is quantized into four levels and then used for training. Four-way softmax has been used to predict pixel quantization.
+
 2. Following is the result after 60 epochs of training which got completed in about 10 hrs on K6000 Gpu. No hyper parameter search has been performed. 
 
 Generated images
