@@ -33,4 +33,10 @@ Training images
 
 Salient features: No blind spots, efficient implemenattion of vertical stacks and horizontal stacks, residual connections and good generation results :D
 
+
+For any comments/feedback, feel free to email me at kundankumar2510@gmail.com or open an issue here.
+
 TODO: Implement gated activation and conditional generation.
+
+If you have GPU resources, feel free to train on CIFAR10. I have provided training script for that. Let me know how it goes.
+Also, one can train with 256-way softmax and perform hyperparameter search on MNIST dataset.
