@@ -1,4 +1,5 @@
 # Generating images pixel by pixel
+###### Theano implementation of pixelCNN architecture
 ### This repository contains code for training an image generator using the pixelCNN architecture as described in [Conditional Image Generation with PixelCNN Decoders](https://arxiv.org/abs/1606.05328)
 
 Most of the code is in core theano. 'keras' has been used for loading data. Optimizer implementation from 'lasagne' has been used.
@@ -11,6 +12,8 @@ Dependencies:
 
 [keras](http://keras.io/#getting-started-30-seconds-to-keras)
 
+You can use [experiments.sh](experiments.sh) to train the model and [install_dependencies.sh](install_dependencies.sh) to install the dependencies.
+
 Generated images
 
 ![Generated images](output/generated_only_images.jpg)
@@ -22,15 +25,6 @@ Training images
 
 
 
-
-
-
-
-
-
-
-
-
-Salient features: No blind spots, efficient implemenattion of vertical stacks and horizontal stacks and good generation results :D
+Salient features: No blind spots, efficient implemenattion of vertical stacks and horizontal stacks, residual connections and good generation results :D
 
 TODO: Implement gated activation and conditional generation.
